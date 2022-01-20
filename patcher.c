@@ -82,6 +82,7 @@ int kp_patcher_thread(void *arg) {
         kp_dump_memory(t->addr, t->size);
         memcpy((void *)t->addr, t->value, t->size);
         kp_dump_memory(t->addr, t->size);
+        pr_info("Patch applied.\n");
 
         /* Set memory back to RO. */
         if (!kp_set_memory_ro(t->addr, t->size)) {
