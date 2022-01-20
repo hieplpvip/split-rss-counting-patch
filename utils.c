@@ -16,6 +16,8 @@ static struct kprobe kp = {
 
 typedef unsigned long (*kallsyms_lookup_name_t)(const char* name);
 kallsyms_lookup_name_t kallsyms_lookup_name_sym = 0;
+#else
+#include <linux/kallsyms.h>
 #endif
 
 unsigned long kp_kallsyms_lookup_name(const char* name) {
