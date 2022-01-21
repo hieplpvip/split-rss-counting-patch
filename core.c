@@ -16,6 +16,7 @@ uint8_t handle_mm_fault_patch_find[20];
 uint8_t handle_mm_fault_patch_repl[20];
 
 bool split_rss_counting_patch_build(void) {
+#if defined(CONFIG_X86_64)
   int i;
   uint8_t cmp_edx_0x40[] = {0x83, 0xfa, 0x40};
   uint8_t jg[] = {0x0f, 0x8f};
@@ -48,8 +49,8 @@ bool split_rss_counting_patch_build(void) {
   }
 
   /*
-   * We'll patch: jg <dist> (6 bytes)
-   * into:        jmp <dist> (5 bytes)
+   * We'll patch: jg <distance> (6 bytes)
+   * into:        jmp <distance> (5 bytes)
    *              nop (1 byte)
    */
   jump_distance = *(uint32_t *)(jg_addr + 2) + 6;
@@ -59,6 +60,53 @@ bool split_rss_counting_patch_build(void) {
   handle_mm_fault_patch_repl[0] = 0xe9;
   *(uint32_t *)(handle_mm_fault_patch_repl + 1) = jump_distance - 5;
   handle_mm_fault_patch_repl[5] = 0x90; /* nop */
+#elif defined(CONFIG_ARM64)
+  int i;
+  uint32_t opcode, imm;
+  uint32_t cmp_w1_0x40 = 0x7101003f;
+  uint32_t b_mask = 0xff00001f;
+  uint32_t b_gt = 0x5400000c;
+  unsigned long cmp_w1_0x40_addr = 0;
+  unsigned long b_gt_addr = 0;
+
+  /* Find cmp w1, #0x40. */
+  for (i = 0; i < 300; i++) {
+    if (*((uint32_t *)(handle_mm_fault_addr) + i) == cmp_w1_0x40) {
+      cmp_w1_0x40_addr = (unsigned long)((uint32_t *)(handle_mm_fault_addr) + i);
+      break;
+    }
+  }
+  if (!cmp_w1_0x40_addr) {
+    pr_err("Could not find instruction cmp w1, #0x40\n");
+    return false;
+  }
+
+  /* Find b.gt */
+  for (i = 0; i < 10; ++i) {
+    opcode = *((uint32_t *)(cmp_w1_0x40_addr) + i);
+    if ((opcode & b_mask) == b_gt) {
+      b_gt_addr = (unsigned long)((uint32_t *)(cmp_w1_0x40_addr) + i);
+      break;
+    }
+  }
+  if (!b_gt_addr) {
+    pr_err("Could not find instruction b.gt\n");
+    return false;
+  }
+
+  /*
+   * We'll patch: b.gt <distance> (4 bytes)
+   * into:        b    <distance> (4 bytes)
+   */
+  imm = (opcode >> 5) & ((1ul << 19) - 1);       /* imm19 */
+  imm = imm | ((imm & 0x40000) ? 0x3f80000 : 0); /* sign extend to imm26 */
+  handle_mm_fault_patch_addr = b_gt_addr;
+  handle_mm_fault_patch_size = 4;
+  *(uint32_t *)handle_mm_fault_patch_find = opcode;
+  *(uint32_t *)handle_mm_fault_patch_repl = imm | 0x14000000;
+#else
+#error "Unsupported architecture"
+#endif
 
   pr_info("Built patch successfully! Patch find:\n");
   kp_dump_memory((unsigned long)handle_mm_fault_patch_find, handle_mm_fault_patch_size);

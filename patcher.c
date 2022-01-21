@@ -1,5 +1,6 @@
 #include <linux/cpu.h>
 #include <linux/kthread.h>
+#include <linux/mm.h>
 #include <linux/string.h>
 #include "utils.h"
 
@@ -72,11 +73,33 @@ int kp_patcher_thread(void *arg) {
         pr_info("All CPUs locked. Patching...\n");
 
         /* Set memory to RW. */
+#if defined(CONFIG_X86_64)
         if (!kp_set_memory_rw(t->addr, t->size)) {
           pr_err("Could not set memory to RW.\n");
           kp_patcher_proceed = 0;
           goto release;
         }
+#elif defined(CONFIG_ARM64)
+        /*
+         * Due to how memory mapping is done on arm64, it's not possible
+         * (AFAIK) to mark a specific memory region as RW, so we have to
+         * mark the whole .text section as RW. This should not be (or is it?)
+         * a security issue since we have effectively locked all CPUs,
+         * and the time window is extremely short.
+         *
+         * In addition, we need to patch the linear alias of .text,
+         * not .text itself. The exact reason for this is unknown, but I
+         * speculate it's related to permission, as .text is marked as R+X
+         * while the linear alias is only R.
+         *
+         * See https://github.com/torvalds/linux/commit/5ea5306c3235a157f06040c59730b1133115ed26
+         */
+        preempt_disable();
+        kp_mark_linear_text_alias_rw();
+        t->addr = (unsigned long)lm_alias(t->addr);
+#else
+#error "Unsupported architecture"
+#endif
 
         /* Apply patch. Dump before and after. */
         kp_dump_memory(t->addr, t->size);
@@ -85,9 +108,17 @@ int kp_patcher_thread(void *arg) {
         pr_info("Patch applied.\n");
 
         /* Set memory back to RO. */
+#if defined(CONFIG_X86_64)
         if (!kp_set_memory_ro(t->addr, t->size)) {
           pr_err("Could not set memory to RO.\n");
         }
+#elif defined(CONFIG_ARM64)
+        kp_mark_linear_text_alias_ro();
+        preempt_enable();
+#else
+#error "Unsupported architecture"
+#endif
+
         kp_patcher_proceed = 0;
       }
     }
@@ -97,7 +128,9 @@ int kp_patcher_thread(void *arg) {
     }
   } while (1);
 
+#if defined(CONFIG_X86_64)
 release:
+#endif
   kp_patcher_cpu_states[t->cpu] = 0;
   put_cpu();
 
