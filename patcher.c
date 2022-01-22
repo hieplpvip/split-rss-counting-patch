@@ -58,7 +58,7 @@ int kp_patcher_thread(void *arg) {
   }
 
   /* Lock CPU. */
-  get_cpu();
+  get_cpu(); /* disable preemption */
   kp_patcher_cpu_states[t->cpu] = 1;
 
   do {
@@ -96,7 +96,6 @@ int kp_patcher_thread(void *arg) {
          *
          * See https://github.com/torvalds/linux/commit/5ea5306c3235a157f06040c59730b1133115ed26
          */
-        preempt_disable();
         kp_mark_linear_text_alias_rw();
         t->addr = (unsigned long)lm_alias(t->addr);
 #else
@@ -105,7 +104,9 @@ int kp_patcher_thread(void *arg) {
 
         /* Apply patch. Dump before and after. */
         kp_dump_memory(t->addr, t->size);
+        barrier();
         memcpy((void *)t->addr, t->value, t->size);
+        barrier();
         kp_dump_memory(t->addr, t->size);
         pr_info("Patch applied.\n");
 
@@ -116,7 +117,6 @@ int kp_patcher_thread(void *arg) {
         }
 #elif defined(CONFIG_ARM64)
         kp_mark_linear_text_alias_ro();
-        preempt_enable();
 #else
 #error "Unsupported architecture"
 #endif
@@ -133,8 +133,9 @@ int kp_patcher_thread(void *arg) {
 #if defined(CONFIG_X86_64)
 release:
 #endif
+  /* Unlock CPU. */
   kp_patcher_cpu_states[t->cpu] = 0;
-  put_cpu();
+  put_cpu(); /* enable preemption */
 
 out:
   pr_info("Thread of CPU %u died...\n", t->cpu);

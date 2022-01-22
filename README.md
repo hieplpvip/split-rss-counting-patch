@@ -62,7 +62,7 @@ generated "on-the-fly" to account for possible change in the jump target.
 You need `make` and `linux-headers-*` to build this kernel module.
 
 ```
-sudo apt install build-essentials linux-headers-$(uname -r)
+sudo apt install build-essential linux-headers-$(uname -r)
 ```
 
 To build the module:
